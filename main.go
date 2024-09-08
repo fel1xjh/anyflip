@@ -26,6 +26,8 @@ var tempDownloadFolder string
 var insecure bool
 var keepDownloadFolder bool
 
+const outputDir = "D:/Downloads"
+
 type flipbook struct {
 	URL       *url.URL
 	title     string
@@ -60,9 +62,17 @@ func main() {
 	}
 
 	if tempDownloadFolder == "" {
-		tempDownloadFolder = flipbook.title
+		tempDownloadFolder = filepath.Join(outputDir, flipbook.title)
+	} else {
+		// Force tempDownloadFolder to outputDir
+		tempDownloadFolder = filepath.Join(outputDir, filepath.Base(tempDownloadFolder))
 	}
-	outputFile := title + ".pdf"
+
+	if title == "" {
+		title = flipbook.title
+	}
+
+	outputFile := filepath.Join(outputDir, title+".pdf")
 
 	err = flipbook.downloadImages(tempDownloadFolder)
 	if err != nil {
@@ -169,7 +179,7 @@ func createPDF(outputFile string, imageDir string) error {
 }
 
 func (fb *flipbook) downloadImages(downloadFolder string) error {
-	err := os.Mkdir(downloadFolder, os.ModePerm)
+	err := os.MkdirAll(downloadFolder, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -195,7 +205,7 @@ func (fb *flipbook) downloadImages(downloadFolder string) error {
 
 		extension := path.Ext(downloadURL)
 		filename := fmt.Sprintf("%04d%v", page, extension)
-		file, err := os.Create(path.Join(downloadFolder, filename))
+		file, err := os.Create(filepath.Join(downloadFolder, filename))
 		if err != nil {
 			return err
 		}

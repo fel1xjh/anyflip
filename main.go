@@ -72,7 +72,7 @@ func main() {
 		title = flipbook.title
 	}
 
-	outputFile := filepath.Join(outputDir, title+".pdf")
+	outputFile := "D:/Downloads/output.pdf"
 
 	err = flipbook.downloadImages(tempDownloadFolder)
 	if err != nil {

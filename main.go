@@ -22,7 +22,7 @@ import (
 )
 
 var title string
-var customFolder string
+var tempDownloadFolder string
 var insecure bool
 var keepDownloadFolder bool
 
@@ -35,7 +35,7 @@ type flipbook struct {
 
 func init() {
 	flag.Usage = printUsage
-	flag.StringVar(&customFolder, "custom-folder", "", "Specifies the name of the custom download folder")
+	flag.StringVar(&tempDownloadFolder, "temp-download-folder", "", "Specifies the name of the temporary download folder")
 	flag.StringVar(&title, "title", "", "Specifies the name of the generated PDF document (uses book title if not specified)")
 	flag.BoolVar(&insecure, "insecure", false, "Skip certificate validation")
 	flag.BoolVar(&keepDownloadFolder, "keep-download-folder", false, "Keep the temporary download folder instead of deleting it after completion")
@@ -59,26 +59,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if customFolder != "" {
-		fmt.Println("Specify Download Folder:")
-		fmt.Scanln(&customFolder)
-	} else {
-		customFolder = flipbook.title
+	if tempDownloadFolder == "" {
+		tempDownloadFolder = flipbook.title
 	}
 	outputFile := title + ".pdf"
 
-	err = flipbook.downloadImages(customFolder)
+	err = flipbook.downloadImages(tempDownloadFolder)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Converting to pdf")
-	err = createPDF(outputFile, customFolder)
+	err = createPDF(outputFile, tempDownloadFolder)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	if !keepDownloadFolder {
-		os.RemoveAll(customFolder)
+		os.RemoveAll(tempDownloadFolder)
 	}
 }
 
@@ -214,28 +211,6 @@ func (fb *flipbook) downloadImages(downloadFolder string) error {
 	fmt.Println()
 	return nil
 }
-
-func downloadConfigJSFile(bookURL *url.URL) (string, error) {
-	configjsURL, err := url.Parse("https://online.anyflip.com")
-	if err != nil {
-		return "", err
-	}
-	configjsURL.Path = path.Join(bookURL.Path, "mobile", "javascript", "config.js")
-	resp, err := http.Get(configjsURL.String())
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", errors.New("received non-200 response:" + resp.Status)
-	}
-	configjs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(configjs), nil
-}
-
 
 func downloadConfigJSFile(bookURL *url.URL) (string, error) {
 	configjsURL, err := url.Parse("https://online.anyflip.com")

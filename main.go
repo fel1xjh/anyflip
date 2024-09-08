@@ -62,7 +62,7 @@ func main() {
 	if tempDownloadFolder == "" {
 		tempDownloadFolder = flipbook.title
 	}
-	outputFile := "D:/Downloads/" + title + ".pdf"
+	var outputFile string
 
 	err = flipbook.downloadImages(tempDownloadFolder)
 	if err != nil {

@@ -133,9 +133,9 @@ func sanitizeURL(anyflipURL *url.URL) {
 }
 
 func createPDF(outputFile string, imageDir string) error {
-	outputFile = strings.ReplaceAll(outputFile, "'", "")
-	outputFile = strings.ReplaceAll(outputFile, "\\", "")
-	outputFile = strings.ReplaceAll(outputFile, ":", "")
+	//outputFile = strings.ReplaceAll(outputFile, "'", "")
+	//outputFile = strings.ReplaceAll(outputFile, "\\", "")
+	//outputFile = strings.ReplaceAll(outputFile, ":", "")
 
 	if _, err := os.Stat(outputFile); err == nil {
 		fmt.Printf("Output file %s already exists", outputFile)

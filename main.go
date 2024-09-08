@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,21 +13,19 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/asaskevich/govalidator"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
-	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
+	"github.com/pdfcpu/pdfpkg/pdfcpu"
 	"github.com/schollz/progressbar/v3"
 )
 
 var title string
-var tempDownloadFolder string
 var insecure bool
 var keepDownloadFolder bool
-
-const outputDir = "D:/Downloads"
 
 type flipbook struct {
 	URL       *url.URL
@@ -37,7 +36,6 @@ type flipbook struct {
 
 func init() {
 	flag.Usage = printUsage
-	flag.StringVar(&tempDownloadFolder, "temp-download-folder", "", "Specifies the name of the temporary download folder")
 	flag.StringVar(&title, "title", "", "Specifies the name of the generated PDF document (uses book title if not specified)")
 	flag.BoolVar(&insecure, "insecure", false, "Skip certificate validation")
 	flag.BoolVar(&keepDownloadFolder, "keep-download-folder", false, "Keep the temporary download folder instead of deleting it after completion")
@@ -61,31 +59,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if tempDownloadFolder == "" {
-		tempDownloadFolder = filepath.Join(outputDir, flipbook.title)
-	} else {
-		// Force tempDownloadFolder to outputDir
-		tempDownloadFolder = filepath.Join(outputDir, filepath.Base(tempDownloadFolder))
-	}
+	outputFile := title + ".pdf"
 
-	if title == "" {
-		title = flipbook.title
-	}
-
-	outputFile := "D:/Downloads/output.pdf"
-
-	err = flipbook.downloadImages(tempDownloadFolder)
+	err = flipbook.downloadImages("D:/Downloads")
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("Converting to pdf")
-	err = createPDF(outputFile, tempDownloadFolder)
+	err = createPDF(outputFile, "D:/Downloads")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	if !keepDownloadFolder {
-		os.RemoveAll(tempDownloadFolder)
+		os.RemoveAll("D:/Downloads")
 	}
 }
 
@@ -165,80 +152,123 @@ func createPDF(outputFile string, imageDir string) error {
 		ext := filepath.Ext(file.Name())
 		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
 			imagePaths = append(imagePaths, filepath.Join(imageDir, file.Name()))
-		}
-	}
+		}	}
 
-	if len(imagePaths) == 0 {
-		return fmt.Errorf("no images found in path %s", imageDir)
-	}
-
-	impConf := pdfcpu.DefaultImportConfig()
-	err = api.ImportImagesFile(imagePaths, outputFile, impConf, nil)
-
-	return err
-}
-
-func (fb *flipbook) downloadImages(downloadFolder string) error {
-	err := os.MkdirAll(downloadFolder, os.ModePerm)
+	api.NewContext("pdfcpu")
+	pdf, err := api.ImportFldr(imagePaths)
 	if err != nil {
 		return err
 	}
 
-	bar := progressbar.NewOptions(fb.pageCount,
-		progressbar.OptionFullWidth(),
-		progressbar.OptionSetPredictTime(false),
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetDescription("Downloading"),
-	)
+	err = pdf.WriteFile(outputFile)
+	if err != nil {
+		return err
+	}
 
-	for page := 0; page < fb.pageCount; page++ {
-		downloadURL := fb.pageURLs[page]
-		response, err := http.Get(downloadURL)
+	fmt.Printf("PDF created: %s\n", outputFile)
+	return nil
+}
+
+func downloadConfigJSFile(anyflipURL *url.URL) ([]byte, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", anyflipURL.String()+"?configjs", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
+}
+
+func getBookTitle(configjs []byte) (string, error) {
+	var config map[string]interface{}
+	err := json.Unmarshal(configjs, &config)
+	if err != nil {
+		return "", err
+	}
+
+	title, ok := config["bookTitle"]
+	if !ok {
+		return "", errors.New("book title not found")
+	}
+
+	return title.(string), nil
+}
+
+func getPageCount(configjs []byte) (int, error) {
+	var config map[string]interface{}
+	err := json.Unmarshal(configjs, &config)
+	if err != nil {
+		return 0, err
+	}
+
+	pageCount, ok := config["pageCount"]
+	if !ok {
+		return 0, errors.New("page count not found")
+	}
+
+	return int(pageCount.(float64)), nil
+}
+
+func getPageFileNames(configjs []byte) []string {
+	var config map[string]interface{}
+	err := json.Unmarshal(configjs, &config)
+	if err != nil {
+		return nil
+	}
+
+	pageFileNames, ok := config["pageFileNames"]
+	if !ok {
+		return nil
+	}
+
+	pageFileNamesSlice, ok := pageFileNames.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	var pageFileNamesStr []string
+	for _, v := range pageFileNamesSlice {
+		pageFileNamesStr = append(pageFileNamesStr, v.(string))
+	}
+
+	return pageFileNamesStr
+}
+
+func (f *flipbook) downloadImages(downloadDir string) error {
+	bar := progressbar.Default(int64(f.pageCount))
+	for _, url := range f.pageURLs {
+		resp, err := http.Get(url)
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 
-		if response.StatusCode != http.StatusOK {
-			println("During download from ", downloadURL)
-			return errors.New("Received non-200 response: " + response.Status)
-		}
-
-		extension := path.Ext(downloadURL)
-		filename := fmt.Sprintf("%04d%v", page, extension)
-		file, err := os.Create(filepath.Join(downloadFolder, filename))
+		fileName := filepath.Base(url)
+		filePath := filepath.Join(downloadDir, fileName)
+		f, err := os.Create(filePath)
 		if err != nil {
 			return err
 		}
-		defer file.Close()
+		defer f.Close()
 
-		_, err = io.Copy(file, response.Body)
+		_, err = io.Copy(f, resp.Body)
 		if err != nil {
 			return err
 		}
 
 		bar.Add(1)
 	}
-	fmt.Println()
-	return nil
-}
 
-func downloadConfigJSFile(bookURL *url.URL) (string, error) {
-	configjsURL, err := url.Parse("https://online.anyflip.com")
-	if err != nil {
-		return "", err
-	}
-	configjsURL.Path = path.Join(bookURL.Path, "mobile", "javascript", "config.js")
-	resp, err := http.Get(configjsURL.String())
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", errors.New("received non-200 response:" + resp.Status)
-	}
-	configjs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(configjs), nil
+	return nil
 }
